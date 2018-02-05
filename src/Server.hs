@@ -1,7 +1,6 @@
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TypeOperators         #-}
@@ -11,30 +10,23 @@ module Server
     ) where
 
 import           Control.Monad.IO.Class (liftIO)
-import           Data.List
-import           Data.Maybe
-import           Database.Redis         (checkedConnect, defaultConnectInfo,
-                                         runRedis, set)
-import           Job                    (JobId (JobId), PublishRequest (..))
-import           Prelude                (const, print, return, ($), (.))
+import           Data.Aeson             (FromJSON)
+import           Job                    (JobId (JobId))
+import           Prelude                (IO, return, ($), (.))
 import           Servant
 
-type JobQueueAPI
-    = "queue" :> ReqBody '[JSON] PublishRequest :> Post '[JSON] JobId
+type JobQueueAPI a
+    = "queue" :> ReqBody '[JSON] a :> Post '[JSON] JobId
 
-api :: Proxy JobQueueAPI
+type JobHandler a = a -> IO ()
+
+api :: Proxy (JobQueueAPI a)
 api = Proxy
 
-server :: Server JobQueueAPI
-server x = do
-    liftIO $ print x
-    conn <- liftIO $ checkedConnect defaultConnectInfo
-    liftIO . runRedis conn $
-        case x of
-            PublishHardware _ -> set "work" "publish"
-            PublishChannel _  -> set "work" "channel"
-            ApplyChanges _ _  -> set "work" "apply"
+server :: JobHandler a -> Server (JobQueueAPI a)
+server f x = do
+    liftIO . f $ x
     return $ JobId 1
 
-app :: Application
-app = serve api server
+app :: FromJSON a => JobHandler a -> Application
+app x = serve api (server x)
